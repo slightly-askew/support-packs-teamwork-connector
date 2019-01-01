@@ -1,3 +1,6 @@
+# Private config
+.env
+
 # Logs
 logs
 *.log
