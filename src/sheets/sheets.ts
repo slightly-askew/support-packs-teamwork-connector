@@ -1,17 +1,19 @@
 export const getRange = range => {
-  const sheet = SpreadsheetApp.getActiveSheet();
+  const ss = SpreadsheetApp.getActive();
+  const sheet = ss.getSheetByName('Retainers');
   const data = sheet.getRange(range).getValues();
   return data;
 };
 
 export const refreshSheetData = (data: any[]) => {
-  const dataRowStart = 2;
-  const dataLength = data.length;
-  const ss = SpreadsheetApp.getActive();
+  const headerRows = 1;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName('data');
-  const lastOldRow = sheet.getLastRow();
-  sheet.deleteRows(dataRowStart, lastOldRow - dataRowStart);
-  sheet.insertRows(dataRowStart, dataLength);
-  const range = sheet.getRange(`A${dataRowStart}: I${dataLength + dataRowStart - 1}`);
-  return range.setValues(data);
+  const lastOldRow = sheet.getMaxRows();
+  if (lastOldRow > headerRows) {
+    sheet.deleteRows(headerRows + 1, lastOldRow - headerRows);
+  }
+  sheet.insertRowsAfter(headerRows, data.length);
+  const lastNewRow = sheet.getMaxRows();
+  return sheet.getRange(headerRows + 1, 1, data.length, data[0].length).setValues(data);
 };
