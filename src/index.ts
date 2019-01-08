@@ -27,16 +27,12 @@ const getTimeData = (id: number): timeEntry[] => {
   return makeHttpGetRequest(getProjectTime(id), { filter: 'all' }, TEAMWORK_KEY)['time-entries'];
 };
 
-global.sampleTimeData = () => Logger.log(getTimeData(321525).map(t => JSON.stringify(t, null, 4)));
-
 const getTaskData = (id: number): taskEntry[] => {
   const params = { 'task-ids': getNumberValues(TAGS) };
   return makeHttpGetRequest(getProjectTasks(id), { filter: 'all', ...params }, TEAMWORK_KEY)[
     'todo-items'
   ];
 };
-
-global.sampleTaskData = () => Logger.log(getTaskData(321525).map(t => JSON.stringify(t, null, 4)));
 
 const processTimeInHrs = (hrs: number, mins: number, roundUpToMins = 15): number =>
   (Math.ceil((hrs * 60 + mins) / roundUpToMins) * (hrs * 60 + mins)) / roundUpToMins / 60;
