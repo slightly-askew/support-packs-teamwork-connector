@@ -1,6 +1,6 @@
 # Private config
 .env
-key.js
+src/key.js
 
 # Logs
 logs

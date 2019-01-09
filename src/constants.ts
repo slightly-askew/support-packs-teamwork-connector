@@ -19,3 +19,6 @@ export const getProjectTasks = (id: number): string =>
 
 export const getProjectTime = (id: number): string =>
   `https://pm.cbo.me/projects/${id}/time_entries.json`;
+
+export const getTaskTime = (id: number): string =>
+  `https://pm.cbo.me/tasks/${id}/time_entries.json`;

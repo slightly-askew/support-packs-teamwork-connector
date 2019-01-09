@@ -1,41 +1,62 @@
 import { getRange, refreshSheetData } from './sheets/index';
 import { getDayFormat, testTLA, projectIDs } from './sheets/util';
-import { getProjectTasks, getProjectTime, TAGS, SUPPORT_ID } from './constants';
+import { getProjectTasks, getProjectTime, getTaskTime, TAGS, SUPPORT_ID } from './constants';
 import { makeQueryString, makeHttpGetRequest } from './server/http';
 import { taskEntry, timeEntry, supportPackInfo } from './types';
 
 import { TEAMWORK_KEY } from './key';
-//The above file (key.js) needs to be added manually to /src folder.
+//The above file (~/src/key.js) needs to be added manually.
 //Do not under any circumstance check this file into version control.
-//It is ignored in .gitignore
+//It is ignored in .gitignore by default
+
+const getMinAndMax = (range: number[]): { min: number; max: number } => ({
+  min: Math.min(...range),
+  max: Math.max(...range)
+});
 
 const getInitialData = (): supportPackInfo[] => {
   const range = getRange('C2:F');
-  return range.map(r => ({
+  const rangeObj = range.map(r => ({
     tla: r[0].toString(),
     projects: projectIDs(r[1].toString()),
     fromDate: getDayFormat(r[2]),
     toDate: getDayFormat(r[3])
   }));
-};
-
-const getNumberValues = obj => {
-  for (const v in obj) return parseInt(obj[v]);
+  Logger.log(JSON.stringify(rangeObj, null, 4));
+  return rangeObj;
 };
 
 const getTimeData = (id: number): timeEntry[] => {
-  return makeHttpGetRequest(getProjectTime(id), { filter: 'all' }, TEAMWORK_KEY)['time-entries'];
+  return makeHttpGetRequest(getTaskTime(id), { filter: 'all' }, TEAMWORK_KEY)['time-entries'];
 };
 
-const getTaskData = (id: number): taskEntry[] => {
-  const params = { 'task-ids': getNumberValues(TAGS) };
-  return makeHttpGetRequest(getProjectTasks(id), { filter: 'all', ...params }, TEAMWORK_KEY)[
-    'todo-items'
-  ];
+const objectValues = (obj: {}): any[] => {
+  let list = [];
+  for (let o in obj) {
+    list.push(obj[o]);
+  }
+  return list;
 };
 
-const processTimeInHrs = (hrs: number, mins: number, roundUpToMins = 15): number =>
-  (Math.ceil((hrs * 60 + mins) / roundUpToMins) * (hrs * 60 + mins)) / roundUpToMins / 60;
+const getTaskData = (id: number, dates?: { min: number; max: number }): taskEntry[] => {
+  const params = {
+    'tag-ids': objectValues(TAGS).join()
+  };
+  if (dates) {
+    params['completedAfterDate'] = dates.min;
+    params['completedBeforeDate'] = dates.max;
+  }
+  if (dates) {
+    params['filter'] = 'completed';
+  }
+  return makeHttpGetRequest(getProjectTasks(id), { ...params }, TEAMWORK_KEY)['todo-items'];
+};
+
+const processTimeInHrs = (hrs: number, mins: number, roundUpToMins = 15): number => {
+  const totalMins: number = hrs * 60 + mins;
+  const roundedTime: number = (Math.ceil(totalMins / roundUpToMins) * roundUpToMins) / 60;
+  return parseFloat(roundedTime.toFixed(2));
+};
 
 const sumTimeEntries = (entries: timeEntry[]) => {
   const acc = {
@@ -110,12 +131,18 @@ const makeDataArray = (
     });
 };
 
-const getProjectData = (ids: string[]) => {
-  const timeData = ids.map(id => getTimeData(parseInt(id))).reduce((a, i) => a.concat(i), []);
-  const taskData = ids.map(id => getTaskData(parseInt(id))).reduce((a, i) => a.concat(i), []);
+const getProjectData = (ids: string[], dates?: { min: number; max: number }) => {
+  const tasks = ids.map(id => getTaskData(parseInt(id))).reduce((a, i) => a.concat(i));
+  if (dates) {
+    ids
+      .map(id => getTaskData(parseInt(id), dates))
+      .reduce((a, i) => a.concat(i))
+      .concat(tasks);
+  }
+  const timeData = tasks.map(t => getTimeData(t.id)).reduce((a, i) => a.concat(i), []);
   return {
     timeData: timeData,
-    taskData: taskData
+    taskData: tasks
   };
 };
 
@@ -130,9 +157,12 @@ global.onOpen = () => {
 
 global.hydrateDataSheet = () => {
   const sheetEntries = getInitialData();
-  const supportData = getProjectData([`${SUPPORT_ID}`]);
-  const combinedData = sheetEntries.reduce((a, e) => {
-    const getData = getProjectData(e.projects);
+  const fromDates = sheetEntries.map(p => parseInt(p.fromDate));
+  const toDates = sheetEntries.map(p => parseInt(p.toDate));
+  const supportDateRange = getMinAndMax([...fromDates, ...toDates]);
+  const supportData = getProjectData([`${SUPPORT_ID}`], { ...supportDateRange });
+  const combinedData = sheetEntries.reduce((a, e, i) => {
+    const getData = getProjectData(e.projects, { min: fromDates[i], max: toDates[i] });
     const customerProjectData = makeDataArray(getData, e.tla);
     const supportProjectData = makeDataArray(filterSupportData(supportData, e.tla), e.tla);
     Logger.log(`project data is ${JSON.stringify(customerProjectData, null, 4)}`);
