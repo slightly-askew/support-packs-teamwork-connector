@@ -1,6 +1,6 @@
 {
-  "name": "gas-clasp-starter",
-  "version": "1.2.1",
+  "name": "teamwork-google-sheets-connector",
+  "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -10,20 +10,15 @@
     "deploy": "npm run build && clasp push"
   },
   "repository": {
-    "type": "git",
-    "url": "git+https://github.com/howdy39/gas-clasp-starter.git"
+    "type": "git"
   },
   "keywords": [
     "gas",
     "google-apps-script",
     "clasp"
   ],
-  "author": "howdy39",
+  "author": "slightly-askew",
   "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/howdy39/gas-clasp-starter/issues"
-  },
-  "homepage": "https://github.com/howdy39/gas-clasp-starter#readme",
   "devDependencies": {
     "@types/google-apps-script": "0.0.32",
     "@types/jest": "^23.3.10",

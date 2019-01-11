@@ -9,7 +9,6 @@ export const makeQueryString = (url, params = {}) => {
 
 export const makeHttpGetRequest = (apiUrl, params, accessToken) => {
   const url = makeQueryString(apiUrl, params);
-  Logger.log(url);
   const response = UrlFetchApp.fetch(url, {
     headers: {
       Authorization: `${TEAMWORK_KEY}`

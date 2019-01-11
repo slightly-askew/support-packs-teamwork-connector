@@ -5,6 +5,77 @@ export interface supportPackInfo {
   toDate: string;
 }
 
+export interface processedRetainerPlans {
+  sheetEntries: supportPackInfo[];
+  fromDates: number[];
+  toDates: number[];
+  supportDateRange: { min: number; max: number };
+}
+
+export interface projectData {
+  timeData: timeEntry[];
+  taskData: taskEntry[];
+}
+
+export interface supportProjectData {
+  sheetEntries: supportPackInfo[];
+  fromDates: number[];
+  toDates: number[];
+  supportData: projectData;
+}
+
+export type customerData = projectData[];
+
+export interface customerProjectData {
+  supportData: projectData;
+  customerData: customerData;
+  sheetEntries: supportPackInfo[];
+}
+
+export interface blendedTaskObject {
+  projectId: number;
+  taskId: number;
+  taskTitle: string;
+  completed: boolean;
+  timeEntries: timeEntry[];
+}
+
+export interface blendedTaskTlaObject {
+  projectId: number;
+  taskId: number;
+  tla: string;
+  taskTitle: string;
+  completed: boolean;
+  timeEntries: timeEntry[];
+}
+
+export interface timeSummary {
+  billableHours: number;
+  billableMinutes: number;
+  nonBillableHours: number;
+  nonBillableMinutes: number;
+}
+
+export interface calculatedTime {
+  billableHrs: number;
+  nonBillableHrs: number;
+  totalHrs: number;
+}
+
+export interface taskSummary {
+  projectId: number;
+  taskId: number;
+  taskTitle: string;
+  tla: string;
+  completed: boolean;
+  billableHrs: number;
+  nonBillableHrs: number;
+  totalHrs: number;
+}
+
+export type sheetDataRow = (number | string | boolean)[];
+//Index, ProjectId, TaskId, TLA, BillableTime, NonBillableTime, TotalTime, Completed, TaskTitle
+
 export interface timeEntry {
   'project-id': string;
   isbillable: string;

@@ -1,8 +1,8 @@
 import { getRange, refreshSheetData } from './sheets/index';
-import { getDayFormat, testTLA, projectIDs } from './sheets/util';
+import { getDayFormat, testTLA, projectIDs, pipe } from './sheets/util';
 import { getProjectTasks, getProjectTime, getTaskTime, TAGS, SUPPORT_ID } from './constants';
 import { makeQueryString, makeHttpGetRequest } from './server/http';
-import { taskEntry, timeEntry, supportPackInfo } from './types';
+import * as types from './types';
 
 import { TEAMWORK_KEY } from './key';
 //The above file (~/src/key.js) needs to be added manually.
@@ -14,7 +14,7 @@ const getMinAndMax = (range: number[]): { min: number; max: number } => ({
   max: Math.max(...range)
 });
 
-const getInitialData = (): supportPackInfo[] => {
+const getInitialData = (): types.supportPackInfo[] => {
   const range = getRange('C2:F');
   const rangeObj = range.map(r => ({
     tla: r[0].toString(),
@@ -22,11 +22,10 @@ const getInitialData = (): supportPackInfo[] => {
     fromDate: getDayFormat(r[2]),
     toDate: getDayFormat(r[3])
   }));
-  Logger.log(JSON.stringify(rangeObj, null, 4));
   return rangeObj;
 };
 
-const getTimeData = (id: number): timeEntry[] => {
+const getTimeData = (id: number): types.timeEntry[] => {
   return makeHttpGetRequest(getTaskTime(id), { filter: 'all' }, TEAMWORK_KEY)['time-entries'];
 };
 
@@ -38,7 +37,7 @@ const objectValues = (obj: {}): any[] => {
   return list;
 };
 
-const getTaskData = (id: number, dates?: { min: number; max: number }): taskEntry[] => {
+const getTaskData = (id: number, dates?: { min: number; max: number }): types.taskEntry[] => {
   const params = {
     'tag-ids': objectValues(TAGS).join()
   };
@@ -58,7 +57,7 @@ const processTimeInHrs = (hrs: number, mins: number, roundUpToMins = 15): number
   return parseFloat(roundedTime.toFixed(2));
 };
 
-const sumTimeEntries = (entries: timeEntry[]) => {
+const sumTimeEntries = (entries: types.timeEntry[]): types.timeSummary => {
   const acc = {
     billableHours: 0,
     billableMinutes: 0,
@@ -84,21 +83,26 @@ const sumTimeEntries = (entries: timeEntry[]) => {
   }, acc);
 };
 
-const filterSupportData = (
-  { taskData, timeData }: { taskData: taskEntry[]; timeData: timeEntry[] },
-  tla: string
-) => {
-  const test = new RegExp(`^${tla}`);
-  return { taskData: taskData.filter(d => d['content'].match(test)), timeData: timeData };
+const sumTimeInHrs = (timeEntries: types.timeEntry[]): types.calculatedTime => {
+  const { billableHours, billableMinutes, nonBillableHours, nonBillableMinutes } = sumTimeEntries(
+    timeEntries
+  );
+  const billableHrs = processTimeInHrs(billableHours, billableMinutes, 15);
+  const nonBillableHrs = processTimeInHrs(nonBillableHours, nonBillableMinutes, 5);
+  return {
+    billableHrs: billableHrs,
+    nonBillableHrs: nonBillableHrs,
+    totalHrs: billableHrs + nonBillableHrs
+  };
 };
 
-const makeDataArray = (
+const makeTaskArray = (
   {
     timeData,
     taskData
   }: {
-    timeData: timeEntry[];
-    taskData: taskEntry[];
+    timeData: types.timeEntry[];
+    taskData: types.taskEntry[];
   },
   TLA: string
 ): any[][] => {
@@ -131,14 +135,15 @@ const makeDataArray = (
     });
 };
 
-const getProjectData = (ids: string[], dates?: { min: number; max: number }) => {
-  const tasks = ids.map(id => getTaskData(parseInt(id))).reduce((a, i) => a.concat(i));
+const getProjectData = (ids: string[], dates?: { min: number; max: number }): types.projectData => {
+  let tasks = ids.map(id => getTaskData(parseInt(id))).reduce((a, i) => a.concat(i), []);
   if (dates) {
-    ids
+    const completedTasks = ids
       .map(id => getTaskData(parseInt(id), dates))
-      .reduce((a, i) => a.concat(i))
-      .concat(tasks);
+      .reduce((a, i) => a.concat(i), []);
+    tasks = tasks.concat(completedTasks);
   }
+  Logger.log(`Tasks in projects ${ids} are ${tasks.map(t => `${t.id} `)} Total: ${tasks.length}`);
   const timeData = tasks.map(t => getTimeData(t.id)).reduce((a, i) => a.concat(i), []);
   return {
     timeData: timeData,
@@ -151,23 +156,188 @@ declare var global: any;
 global.onOpen = () => {
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('Teamwork data')
-    .addItem('Refresh Teamwork Data', 'hydrateDataSheet')
+    .addItem('Refresh Teamwork Data', 'refreshData')
     .addToUi();
 };
 
-global.hydrateDataSheet = () => {
+const fetchAndProcessRetainerPlans = (): types.processedRetainerPlans => {
+  const sheetEntries = getInitialData();
+  const fromDates = sheetEntries.map(p => parseInt(p.fromDate));
+  const toDates = sheetEntries.map(p => parseInt(p.toDate));
+  const supportDateRange = getMinAndMax([...fromDates, ...toDates]);
+  return {
+    sheetEntries: sheetEntries,
+    fromDates: fromDates,
+    toDates: toDates,
+    supportDateRange: supportDateRange
+  };
+};
+
+const fetchAllDataFromSupportProjects = ({
+  sheetEntries,
+  fromDates,
+  toDates,
+  supportDateRange
+}: types.processedRetainerPlans): types.supportProjectData => {
+  const supportData = getProjectData([`${SUPPORT_ID}`], { ...supportDateRange });
+  return {
+    sheetEntries: sheetEntries,
+    fromDates: fromDates,
+    toDates: toDates,
+    supportData: supportData
+  };
+};
+
+const fetchDataInCustomerProjects = ({
+  sheetEntries,
+  fromDates,
+  toDates,
+  supportData
+}: types.supportProjectData): types.customerProjectData => ({
+  customerData: sheetEntries.map((e, i) =>
+    getProjectData(e.projects, { min: fromDates[i], max: toDates[i] })
+  ),
+  supportData: supportData,
+  sheetEntries: sheetEntries
+});
+
+const blendTasksAndTime = ({ timeData, taskData }: types.projectData): types.blendedTaskObject[] =>
+  taskData.map(t => ({
+    projectId: t['project-id'],
+    taskTitle: t['content'],
+    taskId: t.id,
+    completed: t.completed,
+    timeEntries: timeData.filter(m => t.id === parseFloat(m.parentTaskId))
+  }));
+
+const makeTaskObjects = ({
+  customerData,
+  supportData,
+  sheetEntries
+}: types.customerProjectData): {
+  customerData: types.blendedTaskObject[][];
+  supportData: types.blendedTaskObject[];
+  sheetEntries: types.supportPackInfo[];
+} => {
+  const taskObjects = {
+    sheetEntries: sheetEntries,
+    customerData: customerData.map(t => blendTasksAndTime(t)),
+    supportData: blendTasksAndTime(supportData)
+  };
+  Logger.log(
+    `${taskObjects.customerData.length} customer projects and ${
+      taskObjects.supportData.length
+    } support tasks`
+  );
+  return taskObjects;
+};
+
+const filterSupportDataByTla = (
+  data: types.blendedTaskObject[],
+  tla: string
+): types.blendedTaskObject[] => {
+  const test = new RegExp(`^${tla}`);
+  Logger.log(`matching with ${test}`);
+  Logger.log(`${data.length} support tasks to check`);
+  const matches = data.filter(d => d.taskTitle.match(test));
+  Logger.log(`matched ${matches.length} support projects to ${tla}`);
+  return matches;
+};
+
+const filterSupportDataIntoCustomerData = ({
+  sheetEntries,
+  customerData,
+  supportData
+}: {
+  sheetEntries: types.supportPackInfo[];
+  customerData: types.blendedTaskObject[][];
+  supportData: types.blendedTaskObject[];
+}): { sheetEntries: types.supportPackInfo[]; customerData: types.blendedTaskObject[][] } => {
+  const filteredData = sheetEntries.map((e, i) =>
+    customerData[i].concat(filterSupportDataByTla(supportData, e.tla))
+  );
+  const data = {
+    sheetEntries: sheetEntries,
+    customerData: filteredData
+  };
+  Logger.log(`support data blended into projects`);
+  return data;
+};
+
+const appendTlaToTasks = ({
+  customerData,
+  sheetEntries
+}: {
+  customerData: types.blendedTaskObject[][];
+  sheetEntries: types.supportPackInfo[];
+}): types.blendedTaskTlaObject[][] =>
+  sheetEntries.map((e, i) => customerData[i].map(d => ({ ...d, tla: e.tla })));
+
+const flattenCustomerData = <T>(data: T[][]): T[] => data.reduce((a, i) => a.concat(i), []);
+
+const sortTimeEntry = ({
+  timeEntries,
+  ...taskInfo
+}: types.blendedTaskTlaObject): types.taskSummary => ({
+  ...taskInfo,
+  ...sumTimeInHrs(timeEntries)
+});
+
+const sortTimeEntries = (data: types.blendedTaskTlaObject[]): types.taskSummary[] => {
+  const sort = data.map(d => sortTimeEntry(d));
+  Logger.log(`sortTimeEntries: ${sort}`);
+  return sort;
+};
+
+const makeRowArray = (taskSummaries: types.taskSummary[]): types.sheetDataRow[] => {
+  const tasks = taskSummaries.map((t, i) => [
+    i + 1,
+    t.projectId,
+    t.taskId,
+    t.tla,
+    t.billableHrs,
+    t.nonBillableHrs,
+    t.totalHrs,
+    t.completed,
+    t.taskTitle
+  ]);
+  Logger.log(`makeRowArray: ${tasks}`);
+  return tasks;
+};
+
+const buildRetainerData = (): types.sheetDataRow[] =>
+  pipe(
+    fetchAllDataFromSupportProjects,
+    fetchDataInCustomerProjects,
+    makeTaskObjects,
+    filterSupportDataIntoCustomerData,
+    appendTlaToTasks,
+    flattenCustomerData,
+    sortTimeEntries,
+    makeRowArray
+  )(fetchAndProcessRetainerPlans());
+
+global.refreshData = () => {
+  refreshSheetData(buildRetainerData());
+};
+/*
+const BROKEN_concatenateSheetArrays = (
+  
+  global.refreshDataSheet = () => {
   const sheetEntries = getInitialData();
   const fromDates = sheetEntries.map(p => parseInt(p.fromDate));
   const toDates = sheetEntries.map(p => parseInt(p.toDate));
   const supportDateRange = getMinAndMax([...fromDates, ...toDates]);
   const supportData = getProjectData([`${SUPPORT_ID}`], { ...supportDateRange });
   const combinedData = sheetEntries.reduce((a, e, i) => {
-    const getData = getProjectData(e.projects, { min: fromDates[i], max: toDates[i] });
-    const customerProjectData = makeDataArray(getData, e.tla);
-    const supportProjectData = makeDataArray(filterSupportData(supportData, e.tla), e.tla);
+    Logger.log(`${e.tla} -> from ${fromDates[i]} to ${toDates[i]}`);
+    const projectData = getProjectData(e.projects, { min: fromDates[i], max: toDates[i] });
+    const customerProjectData = makeTaskArray(projectData, e.tla);
+    const supportProjectData = makeTaskArray(filterSupportData(supportData, e.tla), e.tla);
     Logger.log(`project data is ${JSON.stringify(customerProjectData, null, 4)}`);
     return a.concat(customerProjectData).concat(supportProjectData);
   }, []);
+  Logger.log(`combined data is ${combinedData}`);
   const indexedData = combinedData.map((d, i) => [i, ...d]);
   refreshSheetData(indexedData);
-};
+});*/
