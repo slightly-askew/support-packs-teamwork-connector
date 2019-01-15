@@ -25,8 +25,11 @@ const getInitialData = (): types.supportPackInfo[] => {
   return rangeObj;
 };
 
+//works
 const getTimeData = (id: number): types.timeEntry[] => {
-  return makeHttpGetRequest(getTaskTime(id), { filter: 'all' }, TEAMWORK_KEY)['time-entries'];
+  const data = makeHttpGetRequest(getTaskTime(id), { filter: 'all' }, TEAMWORK_KEY)['time-entries'];
+  Logger.log(`returned an array of length ${data.length} for id ${id}`);
+  return data;
 };
 
 const objectValues = (obj: {}): any[] => {
@@ -96,45 +99,6 @@ const sumTimeInHrs = (timeEntries: types.timeEntry[]): types.calculatedTime => {
   };
 };
 
-const makeTaskArray = (
-  {
-    timeData,
-    taskData
-  }: {
-    timeData: types.timeEntry[];
-    taskData: types.taskEntry[];
-  },
-  TLA: string
-): any[][] => {
-  const taskTimeEntries = taskData.map(k => ({
-    projectId: k['project-id'],
-    taskId: k.id,
-    completed: k.completed,
-    entries: timeData.filter(m => k.id === parseFloat(m.parentTaskId))
-  }));
-  return taskTimeEntries
-    .filter(e => e.entries.length > 0)
-    .map((e, i) => {
-      const {
-        billableHours,
-        billableMinutes,
-        nonBillableHours,
-        nonBillableMinutes
-      } = sumTimeEntries(e.entries);
-      const billable = processTimeInHrs(billableHours, billableMinutes);
-      const nonBillable = processTimeInHrs(nonBillableHours, nonBillableMinutes, 5);
-      return [
-        e.projectId,
-        e.taskId,
-        TLA,
-        billable,
-        nonBillable,
-        billable + nonBillable,
-        e.completed
-      ];
-    });
-};
-
 const getProjectData = (ids: string[], dates?: { min: number; max: number }): types.projectData => {
   let tasks = ids.map(id => getTaskData(parseInt(id))).reduce((a, i) => a.concat(i), []);
   if (dates) {
@@ -143,12 +107,12 @@ const getProjectData = (ids: string[], dates?: { min: number; max: number }): ty
       .reduce((a, i) => a.concat(i), []);
     tasks = tasks.concat(completedTasks);
   }
-  Logger.log(`Tasks in projects ${ids} are ${tasks.map(t => `${t.id} `)} Total: ${tasks.length}`);
-  const timeData = tasks.map(t => getTimeData(t.id)).reduce((a, i) => a.concat(i), []);
-  return {
-    timeData: timeData,
-    taskData: tasks
-  };
+  const timeData = tasks.map(t => {
+    const tD = getTimeData(t.id);
+    return tD;
+  });
+  const flatTimeData = timeData.reduce((a, i) => a.concat(i), []);
+  return { timeData: flatTimeData, taskData: tasks };
 };
 
 declare var global: any;
@@ -201,14 +165,28 @@ const fetchDataInCustomerProjects = ({
   sheetEntries: sheetEntries
 });
 
-const blendTasksAndTime = ({ timeData, taskData }: types.projectData): types.blendedTaskObject[] =>
-  taskData.map(t => ({
-    projectId: t['project-id'],
-    taskTitle: t['content'],
-    taskId: t.id,
-    completed: t.completed,
-    timeEntries: timeData.filter(m => t.id === parseFloat(m.parentTaskId))
-  }));
+const blendTasksAndTime = ({
+  timeData,
+  taskData
+}: types.projectData): types.blendedTaskObject[] => {
+  Logger.log(`I have ${timeData.length} entries to sort for project ${timeData[0].id}`);
+  const blendedObjects = taskData.map(t => {
+    const blendedObject = {
+      projectId: t['project-id'],
+      taskTitle: t['content'],
+      taskId: t.id,
+      completed: t.completed,
+      timeEntries: timeData.filter(m => {
+        return t.id == parseFloat(m['parentTaskId']);
+      })
+    };
+    Logger.log(
+      `fetched ${blendedObject.timeEntries.length} time entries for task ${blendedObject.taskId}`
+    );
+    return blendedObject;
+  });
+  return blendedObjects;
+};
 
 const makeTaskObjects = ({
   customerData,
@@ -219,10 +197,12 @@ const makeTaskObjects = ({
   supportData: types.blendedTaskObject[];
   sheetEntries: types.supportPackInfo[];
 } => {
+  const cD = customerData.map(t => blendTasksAndTime(t));
+  const sD = blendTasksAndTime(supportData);
   const taskObjects = {
     sheetEntries: sheetEntries,
-    customerData: customerData.map(t => blendTasksAndTime(t)),
-    supportData: blendTasksAndTime(supportData)
+    customerData: cD,
+    supportData: sD
   };
   Logger.log(
     `${taskObjects.customerData.length} customer projects and ${
@@ -237,8 +217,6 @@ const filterSupportDataByTla = (
   tla: string
 ): types.blendedTaskObject[] => {
   const test = new RegExp(`^${tla}`);
-  Logger.log(`matching with ${test}`);
-  Logger.log(`${data.length} support tasks to check`);
   const matches = data.filter(d => d.taskTitle.match(test));
   Logger.log(`matched ${matches.length} support projects to ${tla}`);
   return matches;
@@ -260,7 +238,6 @@ const filterSupportDataIntoCustomerData = ({
     sheetEntries: sheetEntries,
     customerData: filteredData
   };
-  Logger.log(`support data blended into projects`);
   return data;
 };
 
@@ -285,7 +262,6 @@ const sortTimeEntry = ({
 
 const sortTimeEntries = (data: types.blendedTaskTlaObject[]): types.taskSummary[] => {
   const sort = data.map(d => sortTimeEntry(d));
-  Logger.log(`sortTimeEntries: ${sort}`);
   return sort;
 };
 
@@ -301,7 +277,6 @@ const makeRowArray = (taskSummaries: types.taskSummary[]): types.sheetDataRow[] 
     t.completed,
     t.taskTitle
   ]);
-  Logger.log(`makeRowArray: ${tasks}`);
   return tasks;
 };
 
@@ -341,3 +316,43 @@ const BROKEN_concatenateSheetArrays = (
   const indexedData = combinedData.map((d, i) => [i, ...d]);
   refreshSheetData(indexedData);
 });*/
+
+/*
+const makeTaskArray = (
+  {
+    timeData,
+    taskData
+  }: {
+    timeData: types.timeEntry[];
+    taskData: types.taskEntry[];
+  },
+  TLA: string
+): any[][] => {
+  const taskTimeEntries = taskData.map(k => ({
+    projectId: k['project-id'],
+    taskId: k.id,
+    completed: k.completed,
+    entries: timeData.filter(m => k.id === parseFloat(m.parentTaskId))
+  }));
+  return taskTimeEntries
+    .filter(e => e.entries.length > 0)
+    .map((e, i) => {
+      const {
+        billableHours,
+        billableMinutes,
+        nonBillableHours,
+        nonBillableMinutes
+      } = sumTimeEntries(e.entries);
+      const billable = processTimeInHrs(billableHours, billableMinutes);
+      const nonBillable = processTimeInHrs(nonBillableHours, nonBillableMinutes, 5);
+      return [
+        e.projectId,
+        e.taskId,
+        TLA,
+        billable,
+        nonBillable,
+        billable + nonBillable,
+        e.completed
+      ];
+    });
+};*/
